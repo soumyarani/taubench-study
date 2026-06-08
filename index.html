@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>τ-bench, explained — Tool-Agent-User interaction</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top"><div class="wrap">
+  <span class="brand">τ<b>·</b>bench study</span>
+  <a class="tab active" href="index.html">Overview</a>
+  <a class="tab" href="instances.html">Instance explorer</a>
+  <a class="tab" href="pipeline.html">Pipeline</a>
+  <a class="tab" href="saber.html">SABER</a>
+  <a class="tab" href="idea.html">The idea</a>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <span class="kicker">Tool · Agent · User benchmark</span>
+  <h1>What <span class="tau">τ-bench</span> actually measures<br>— and what it quietly doesn't</h1>
+  <p class="lead">τ-bench (Sierra, 2024) tests whether an LLM can act as an <b>enterprise customer-service agent</b>:
+  talk to a (simulated) customer, follow a written policy, call domain tools, and leave the
+  <b>database in exactly the right state</b>. It is graded not on what it <em>says</em>, but on what it
+  <em>changed</em>. This page builds the correct mental model, then shows where recent work says the
+  measurement breaks.</p>
+  <div class="pills">
+    <span class="badge dom">2 domains · retail + airline</span>
+    <span class="badge">165 hand-authored tasks</span>
+    <span class="badge mut">graded on final DB state</span>
+    <span class="badge warn">reliability metric: pass^k</span>
+  </div>
+</div></header>
+
+<main class="wrap">
+
+<!-- ============ MENTAL MODEL ============ -->
+<section>
+<h2>The mental model (your 1 · 2 · 3, sharpened)</h2>
+<p>You had the right instinct. Here it is pinned down against the paper.</p>
+
+<div class="grid g3">
+  <div class="card tint-bad">
+    <span class="badge bad">① what it is NOT</span>
+    <h3>Not a shopping assistant</h3>
+    <p>The agent is <b>not</b> on the customer's side. It is <b>not</b> trying to find the cheapest milk
+    or the fastest delivery. There is no optimization over price or time for the user at all.</p>
+    <p class="small muted">In fact the human customer is itself an LLM — the <b>user simulator</b> — reading a
+    hidden script of what it wants.</p>
+  </div>
+  <div class="card tint-acc">
+    <span class="badge read">② what it IS</span>
+    <h3>The enterprise's back-office agent</h3>
+    <p>It is <b>Amazon's / the airline's</b> agent. Its job: check whether a return / exchange / cancellation /
+    rebooking is <b>allowed under policy</b>, and if so, write that one change to the company database.</p>
+    <p class="small muted">Sometimes the correct answer is to <b>do nothing</b> to the DB — just answer a
+    question. <b>29 of the 165 tasks require no database write at all</b> (9 need no tool calls whatsoever).
+    You were right about that.</p>
+  </div>
+  <div class="card tint-good">
+    <span class="badge warn">③ the problem it poses</span>
+    <h3>Mostly: follow if-this-then-that</h3>
+    <p>Each task is authored so the policy admits <b>exactly one</b> correct set of writes. So the core
+    skill is <b>reading rules and applying them in order</b> — closer to executing a deterministic
+    policy than to open-ended planning.</p>
+    <p class="small muted">That's the strength (objective grading) and the critique (it's narrow). More below.</p>
+  </div>
+</div>
+
+<div class="note blue">
+  <b>One correction to your model.</b> You pictured "the database is written for one user and any conflicts
+  are resolved at the database." τ-bench has <b>no concurrency at all</b> — one user, one session, one
+  fixed snapshot of the DB, replayed deterministically. There are <b>no competing writes, no other agents,
+  no contention</b>. That absence is exactly the gap your <a href="idea.html">non-ergodic shopping benchmark</a>
+  and the lab's serializability work aim at.
+</div>
+</section>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section>
+<h2>How one episode runs</h2>
+<div class="flow">
+  <div class="step"><div class="n">PLAYER A</div><h4>User simulator</h4>
+    <p>An LLM given a <b>hidden instruction</b> (identity, intent, preferences). Reveals info one line at a
+    time; never dumps the whole goal.</p></div>
+  <div class="step"><div class="n">PLAYER B</div><h4>The agent (under test)</h4>
+    <p>Gets the <b>policy document</b> as its system prompt + a set of <b>tools</b>. Must authenticate the
+    user, follow rules, confirm before writes.</p></div>
+  <div class="step"><div class="n">WORLD</div><h4>Tools + database</h4>
+    <p>Read tools (<span class="badge read">non-mutating</span>) and write tools
+    (<span class="badge mut">mutating</span>) operate on a realistic DB of users, orders, products / flights.</p></div>
+  <div class="step"><div class="n">JUDGE</div><h4>Reward at the end</h4>
+    <p>No human, no LLM judge. A <b>rule</b> compares the final DB to a gold DB and checks required strings.</p></div>
+</div>
+
+<h3>The grading rule (this is the load-bearing detail)</h3>
+<p>At the end of the conversation, reward is a product of two binary checks:</p>
+<div class="card" style="margin:14px 0">
+  <p class="mono" style="font-size:1.05rem;color:#fff;margin:.2em 0">
+    reward&nbsp;=&nbsp;<span style="color:var(--mut)">r_action</span>&nbsp;×&nbsp;<span style="color:var(--acc2)">r_output</span>&nbsp;∈&nbsp;{0,&nbsp;1}</p>
+  <div class="grid g2" style="margin-top:10px">
+    <div><span class="badge mut">r_action</span><p class="small" style="margin:.5em 0 0">The <b>final database must be byte-identical</b> to the single annotated
+      ground-truth outcome DB. The gold answer is literally "this exact set of write calls, nothing more."
+      Read calls and the wording of the chat are ignored.</p></div>
+    <div><span class="badge read">r_output</span><p class="small" style="margin:.5em 0 0">The agent's messages must <b>contain</b> the required output strings
+      (e.g. a refund amount <code>"54.04"</code>) as <b>substrings</b>. Plain keyword match — not semantic judging.</p></div>
+  </div>
+</div>
+<div class="note warn"><b>The authors' own caveat:</b> reward&nbsp;=&nbsp;1 is <b>necessary but not sufficient</b>.
+An agent can write the right row to the DB <em>without</em> getting the policy-required user confirmation and
+still score 1. The grader sees the destination, not the journey.</div>
+
+<h3>Why a reliability metric, not accuracy</h3>
+<p><b>pass^k</b> ("pass-hat-k") = the probability that a task succeeds in <b>all k</b> independent trials,
+averaged over tasks. It rewards <em>consistency</em>, not luck. This is the paper's punchline:</p>
+<div class="grid g3">
+  <div class="card"><div class="stat acc">~61%</div><div class="stat-l">GPT-4o, retail, pass^1 (solve it once)</div></div>
+  <div class="card"><div class="stat bad">~25%</div><div class="stat-l">Same model, retail, pass^8 (solve it 8/8 times)</div></div>
+  <div class="card"><div class="stat warn">~$200</div><div class="stat-l">cost of one retail trial in the 2024 paper (long policy prompt dominates)</div></div>
+</div>
+<p class="small muted">Frontier agents look competent once and unreliable repeatedly — the gap between
+"can" and "can be trusted to."</p>
+</section>
+
+<!-- ============ WORKED EXAMPLE ============ -->
+<section>
+<h2>A real task, end to end</h2>
+<p>Retail task #0 (you can open it live in the <a href="instances.html">explorer</a>):</p>
+<div class="card">
+  <span class="badge read">hidden user instruction</span>
+  <p style="margin:.6em 0">"You are Yusuf Rossi in 19122. You received order #W2378156 and wish to <b>exchange the mechanical
+  keyboard</b> for a similar one but with clicky switches, and the <b>smart thermostat</b> for one compatible
+  with Google Home instead of Apple HomeKit. If there is no keyboard that is clicky, RGB, full-size, you'd go
+  for no backlight. You are detail-oriented and want everything addressed in one go."</p>
+  <span class="badge mut">gold answer = exactly these calls</span>
+  <pre class="mono small" style="background:#0d141d;border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;color:#cfe0f2">find_user_id_by_name_zip(first_name="Yusuf", last_name="Rossi", zip="19122")   <span class="faint">› read</span>
+get_order_details(order_id="#W2378156")                                       <span class="faint">› read</span>
+get_product_details(product_id="1656367028")                                  <span class="faint">› read</span>
+get_product_details(product_id="4896585277")                                  <span class="faint">› read</span>
+<span style="color:var(--mut)">exchange_delivered_order_items(order_id="#W2378156",
+   item_ids=["1151293680","4983901480"],
+   new_item_ids=["7706410293","7747408585"],
+   payment_method_id="credit_card_9513926")                                   › the ONE mutating call</span></pre>
+  <p class="small muted">The agent must <em>discover</em> all those IDs by reading, reason about variant
+  options against the policy, get confirmation, then make <b>one</b> write that matches gold exactly. Wrong
+  item id, extra write, or skipped item ⇒ reward 0.</p>
+</div>
+</section>
+
+<!-- ============ tau vs tau2 ============ -->
+<section>
+<h2>τ-bench vs τ²-bench (and τ³)</h2>
+<table>
+<thead><tr><th>Dimension</th><th>τ-bench (2024)</th><th>τ²-bench (2025)</th></tr></thead>
+<tbody>
+<tr><td>Control</td><td>Single — only the agent acts; user just talks</td><td><b>Dual-control</b> Dec-POMDP — user <em>also</em> has tools (e.g. toggle airplane mode)</td></tr>
+<tr><td>Domains</td><td>retail (115), airline (50)</td><td><b>telecom</b> (114 of 2,285 generated) + retail/airline/mock</td></tr>
+<tr><td>Tasks</td><td>Hand-authored, single gold outcome</td><td>Compositional generator from atomic subtasks</td></tr>
+<tr><td>User sim</td><td>LLM with hidden instruction (gpt-4-0613 / gpt-4o)</td><td>LLM <b>constrained by env tools/state</b> + Easy/Hard personas</td></tr>
+<tr><td>Eval</td><td>DB-state == gold &nbsp;<b>×</b>&nbsp; output substrings</td><td>+ status assertions, NL assertions, action-matching</td></tr>
+<tr><td>Headline</td><td>gpt-4o 61% / 35% pass^1; pass^8 collapses to ~25%</td><td>telecom pass^1 ~34–50%; dual-control <b>~halves</b> success vs. autonomous</td></tr>
+</tbody></table>
+<p class="small muted">τ²-bench's key finding: take the user away and hand the agent all the tools ("No-User"
+mode) and gpt-4.1 jumps ~0.34 → ~0.73 on telecom. <b>Coordinating with a human is the bottleneck, not raw
+reasoning.</b> Sierra later shipped τ³-bench (knowledge + voice), absorbing many community task fixes.</p>
+</section>
+
+<!-- ============ CRACKS ============ -->
+<section>
+<h2>Where the cracks are — what recent work establishes</h2>
+<p>Four 2025–26 papers, all circling one nerve: <b>the measurement may not mean what the leaderboard implies.</b></p>
+
+<div class="grid g2">
+  <div class="card">
+    <span class="badge mut">SABER · Small Actions, Big Errors</span>
+    <h3>Failure hides in the mutating steps</h3>
+    <p>A deviation on a <b>state-changing</b> action cuts odds of success by up to <b>~92–96%</b>; deviations
+    on read actions barely matter. Protect the few mutating steps and most reliability returns. Also ships
+    <b>τ-Bench Verified</b> — and finds the original gold annotations had real errors.</p>
+    <a class="btn" href="saber.html">Full SABER reading →</a>
+  </div>
+  <div class="card">
+    <span class="badge warn">Lost in Simulation · Seshadri et al.</span>
+    <h3>LLM users aren't real users</h3>
+    <p>Swap the simulator LLM and agent success swings up to <b>9 points</b>. Simulated evals are
+    miscalibrated — over-rating on moderate tasks, under-rating on hard — and disadvantage e.g. AAVE speakers.
+    The "user" is an unreliable proxy.</p>
+    <p class="small faint mono">arXiv 2601.17087</p>
+  </div>
+  <div class="card">
+    <span class="badge warn">Mind the Sim2Real Gap · Zhou et al.</span>
+    <h3>Simulated users are "easy mode"</h3>
+    <p>First full τ-bench run with <b>451 real humans</b>. LLM users are too cooperative, too uniform, never
+    frustrated — <b>inflating</b> agent success vs. humans. And a bigger base model does <em>not</em> make a
+    more faithful simulator. <span class="faint mono">arXiv 2603.11245</span></p>
+  </div>
+  <div class="card">
+    <span class="badge read">LMs Don't Know What You Want · Balepur et al. (ACL)</span>
+    <h3>Synthetic eval misses real failures</h3>
+    <p>For deep-research agents: synthetic users + LLM judges show wins, but interviewing <b>real users</b>
+    surfaced 9 personalization failures the judges <b>entirely missed</b>. Same disease, different domain.
+    <span class="faint mono">arXiv 2603.16120</span></p>
+  </div>
+</div>
+
+<div class="note">
+  <b>The through-line.</b> τ-bench made grading objective by replacing human judgment with a database diff.
+  That was the breakthrough <em>and</em> the catch: it grades the destination state, assumes a single correct
+  path, and leans on an LLM pretending to be a customer. Every critique above pulls one of those three threads.
+</div>
+</section>
+
+<section>
+<h2>Where to go next</h2>
+<div class="grid g3">
+  <a class="card" href="instances.html" style="text-decoration:none"><h3 style="color:var(--acc)">Instance explorer →</h3>
+    <p class="small muted">Scroll all 165 tasks, see every gold action, and <b>run a live agent</b>: you play the
+    customer while an LLM plays the τ-agent (or vice-versa) against the real tool backend.</p></a>
+  <a class="card" href="saber.html" style="text-decoration:none"><h3 style="color:var(--acc)">SABER, critiqued →</h3>
+    <p class="small muted">What it found, its critical claim, whether it holds up, what it misses, and whether
+    the safeguard is overkill.</p></a>
+  <a class="card" href="idea.html" style="text-decoration:none"><h3 style="color:var(--acc)">Your benchmark idea →</h3>
+    <p class="small muted">A shopping agent with <b>non-ergodic</b> state (time & money you can't get back).
+    Why it's a real gap past τ-bench, and how I'd design it.</p></a>
+</div>
+</section>
+
+</main>
+
+<footer><div class="wrap">
+  <b>Sources.</b> τ-bench <a href="https://arxiv.org/abs/2406.12045">arXiv 2406.12045</a> ·
+  τ²-bench <a href="https://arxiv.org/abs/2506.07982">2506.07982</a> ·
+  SABER <a href="https://arxiv.org/abs/2512.07850">2512.07850</a> ·
+  Lost in Simulation <a href="https://arxiv.org/abs/2601.17087">2601.17087</a> ·
+  Sim2Real <a href="https://arxiv.org/abs/2603.11245">2603.11245</a> ·
+  Deep-research evals <a href="https://arxiv.org/abs/2603.16120">2603.16120</a> ·
+  data extracted from <span class="mono">sierra-research/tau-bench</span>.
+  <p class="faint">Built locally for ssamine4 · part of 01-planningfall26-main/outputs/taubench.</p>
+</div></footer>
+</body>
+</html>

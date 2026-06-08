@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>τ-bench pipeline — every prompt, output & the real reward</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  .ev{border:1px solid var(--line);border-radius:12px;margin:12px 0;overflow:hidden;background:var(--panel)}
+  .ev .hd{display:flex;align-items:center;gap:9px;padding:9px 13px;font-weight:600;font-size:.86rem;border-bottom:1px solid var(--line)}
+  .ev.usersim .hd{background:#161020;color:#e6d6ff} .ev.usersim{border-color:#3a2a5a}
+  .ev.agent .hd{background:#0f1f1c;color:#cdf3ea} .ev.agent{border-color:#1f4d44}
+  .ev.tool .hd{background:#1a140a;color:#ffe6bf} .ev.tool{border-color:#5a4620}
+  .ev.end .hd{background:#101820;color:#bcd}
+  .ev .bd{padding:11px 14px}
+  .ev .out{white-space:pre-wrap;font-size:.88rem;line-height:1.5}
+  .ev.new{animation:flash 1s ease}
+  @keyframes flash{from{box-shadow:0 0 0 2px var(--acc)}to{box-shadow:none}}
+  .lbl{font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:10px 0 3px}
+  details.coll{margin:6px 0;border:1px solid var(--line);border-radius:8px;background:#0c121a}
+  details.coll summary{cursor:pointer;padding:6px 10px;font-size:.78rem;color:var(--muted)}
+  details.coll .inner{padding:0 10px 10px}
+  pre.msgs{font-family:var(--mono);font-size:.74rem;color:#bcd;white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;margin:0}
+  .role{color:var(--acc2)} .role.system{color:var(--warn)} .role.assistant{color:var(--acc)} .role.tool{color:var(--mut)}
+  .arrow{color:var(--faint);font-family:var(--mono);font-size:.8rem;margin:4px 0}
+  .cfgbar{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0}
+  .cfgbar label{font-size:.7rem;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:3px}
+  .cfgbar input,.cfgbar select{width:100%;background:#0d141d;border:1px solid var(--line2);color:var(--ink);padding:8px;border-radius:8px;font-size:.82rem;font-family:var(--sans)}
+  .ctrls{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;align-items:center}
+  .diffrow{font-family:var(--mono);font-size:.74rem;border:1px solid var(--line);border-radius:8px;margin:6px 0;overflow:hidden}
+  .diffrow .dh{padding:5px 9px;background:#181018;color:#ffd;border-bottom:1px solid var(--line)}
+  .diffrow .dg{display:grid;grid-template-columns:1fr 1fr;gap:0}
+  .diffrow .dg>div{padding:7px 9px;overflow:auto;max-height:220px}
+  .diffrow .dg .a{background:#1a1012;border-right:1px solid var(--line)} .diffrow .dg .g{background:#0c1a12}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--line2);border-top-color:var(--acc);border-radius:50%;animation:sp 0.7s linear infinite;vertical-align:middle}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .demobox{border:1px solid var(--acc);background:linear-gradient(180deg,#0e1c1b,#0c1413);border-radius:12px;padding:14px 16px;margin:10px 0}
+  .demobox .seg button{font-size:.82rem}
+  mark{background:#3a2a10;color:#ffd9a0;padding:0 3px;border-radius:3px}
+</style>
+</head>
+<body>
+<nav class="top"><div class="wrap">
+  <span class="brand">τ<b>·</b>bench study</span>
+  <a class="tab" href="index.html">Overview</a>
+  <a class="tab" href="instances.html">Instance explorer</a>
+  <a class="tab active" href="pipeline.html">Pipeline</a>
+  <a class="tab" href="saber.html">SABER</a>
+  <a class="tab" href="idea.html">The idea</a>
+</div></nav>
+
+<header class="hero" style="padding:46px 0 26px"><div class="wrap">
+  <span class="kicker">The real loop, nothing hidden</span>
+  <h1>The τ-bench pipeline, step by step</h1>
+  <p class="lead">A faithful re-implementation of <span class="mono">sierra-research/tau-bench</span>: the
+  <b>user-simulator LLM</b> and the <b>agent LLM</b> take turns, the agent calls tools against a live database,
+  and at the end the <b>real reward</b> is computed — by replaying the gold actions on a fresh DB and comparing
+  the two database states. Every prompt and every output is shown verbatim.</p>
+</div></header>
+
+<main class="wrap">
+
+<!-- ---- the control flow, documented ---- -->
+<section>
+<h2>The control flow (exactly as the repo does it)</h2>
+<div class="flow">
+  <div class="step"><div class="n">env.reset()</div><h4>① User speaks first</h4><p>User-sim LLM is seeded with its system prompt + the hidden <em>instruction</em> and the line <code>"Hi! How can I help you today?"</code>, then emits the <b>first customer message</b>. That string is the agent's first <code>obs</code>.</p></div>
+  <div class="step"><div class="n">agent LLM</div><h4>② Agent acts</h4><p>System = policy wiki, with tools. It returns <b>either</b> a tool call <b>or</b> a <code>respond</code>. (If it returns a tool call, only the <em>first</em> one is taken — <code>tool_calls[:1]</code>.)</p></div>
+  <div class="step"><div class="n">env.step()</div><h4>③ World reacts</h4><p><b>respond</b> → the user-sim LLM replies (and may say <code>###STOP###</code>). <b>tool</b> → executed on the DB; the observation is fed back to the agent. The user is <em>not</em> involved on tool steps.</p></div>
+  <div class="step"><div class="n">≤30 steps</div><h4>④ Loop → reward</h4><p>Repeat until <code>###STOP###</code> or 30 steps. Then <code>calculate_reward()</code> runs.</p></div>
+</div>
+<details class="coll"><summary>Show the exact prompts & the reward code this page reproduces</summary><div class="inner">
+  <div class="lbl">User-simulator system prompt (strategy = llm)</div>
+  <pre class="msgs" id="ref-user"></pre>
+  <div class="lbl">Agent system prompt = the policy wiki (retail)</div>
+  <pre class="msgs" id="ref-wiki"></pre>
+  <div class="lbl">reward (from tau_bench/envs/base.py · calculate_reward)</div>
+  <pre class="msgs">r_actions = hash(final_db) == hash(fresh_db after replaying the gold actions)
+r_outputs = every required output appears (lowercased, commas removed) in some respond()
+reward    = 1.0 only if r_actions AND r_outputs, else 0.0</pre>
+</div></details>
+</section>
+
+<!-- ---- DEMO (no key) ---- -->
+<section>
+<h2>Walk-through demo <span class="faint small">— no API key needed</span></h2>
+<div class="demobox">
+  <p style="margin:.2em 0 .7em">A <b>pre-recorded episode</b> you can step through. The conversation is scripted, but the
+  tool calls really execute against the database and the <b>reward at the end is genuinely computed</b>
+  (gold-replay DB vs the agent's DB). Pick the <b>correct</b> run or a <b>broken</b> run to see how the DB-state
+  check catches a wrong outcome.</p>
+  <div class="seg" id="demoSeg" style="max-width:560px">
+    <button data-demo="0" class="on">✓ Correct run → reward 1</button>
+    <button data-demo="1">✗ Broken run (misses the keyboard) → reward 0</button>
+  </div>
+  <div class="ctrls" style="margin-top:12px">
+    <button class="btn primary" id="demoStart">▶ Load demo</button>
+    <button class="btn" id="demoStep" disabled>⏭ Next step</button>
+    <button class="btn" id="demoAuto" disabled>⏩ Play all</button>
+    <span id="dstatus" class="small muted"></span>
+  </div>
+</div>
+</section>
+
+<!-- ---- live runner ---- -->
+<section>
+<h2>Or run it live against the API</h2>
+<div class="note warn"><b>Retail only.</b> The faithful tool backend + full database eval is implemented for the
+retail domain (airline's 5 MB flight DB isn't embedded).</div>
+<div class="cfgbar">
+  <div style="grid-column:1/-1"><label>Task</label><select id="task"></select></div>
+  <div><label>Anthropic API key (local only)</label><input id="key" type="password" placeholder="sk-ant-…"></div>
+  <div><label>Agent model</label><select id="amodel"></select></div>
+  <div><label>User-sim model</label><select id="umodel"></select></div>
+  <div><label>User strategy</label><select id="ustrat"><option value="llm">llm</option><option value="react">react</option></select></div>
+</div>
+<div class="ctrls">
+  <button class="btn primary" id="initBtn">① Initialize (user speaks first)</button>
+  <button class="btn" id="stepBtn" disabled>▶ Step (one LLM call)</button>
+  <button class="btn" id="autoBtn" disabled>⏩ Run to end</button>
+  <button class="btn" id="resetBtn">Reset</button>
+  <span id="status" class="small muted"></span>
+</div>
+
+<div class="panel-card" style="margin:8px 0"><b class="small">Hidden user instruction (the secret script):</b>
+  <div id="instr" class="small muted" style="margin-top:5px">—</div></div>
+<div id="reward"></div>
+<div id="trace"></div>
+</section>
+
+</main>
+
+<script src="data/data_tasks.js"></script>
+<script src="data/data_tools.js"></script>
+<script src="data/data_prompts.js"></script>
+<script src="data/data_retail_db.js"></script>
+<script src="engine.js"></script>
+<script>
+const TASKS=(window.TAU_TASKS||[]).filter(t=>t.domain==="retail");
+const TOOLS=window.TAU_TOOLS||{retail:[]};
+const PROMPTS=window.TAU_PROMPTS||{};
+const E=window.TAUENGINE;
+const GREETING="Hi! How can I help you today?";
+const MODELS=["claude-opus-4-8","claude-sonnet-4-6","claude-haiku-4-5-20251001"];
+const el=s=>document.querySelector(s);
+const esc=s=>(s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+/* =========================================================
+ *  SCRIPTED DEMO EPISODES (task retail-test-0: Yusuf Rossi)
+ *  Conversation is canned; tool calls & reward are REAL.
+ * ========================================================= */
+const EX_INPUT_OK={order_id:"#W2378156",item_ids:["1151293680","4983901480"],new_item_ids:["7706410293","7747408585"],payment_method_id:"credit_card_9513926"};
+const EX_INPUT_BAD={order_id:"#W2378156",item_ids:["4983901480"],new_item_ids:["7747408585"],payment_method_id:"credit_card_9513926"};
+function demoTurns(exchangeInput, finalMsg){ return [
+  {respond:"I can help with that. First I need to verify your identity — could you give me your full name and the zip code on file?",
+   userReply:"Sure, I'm Yusuf Rossi, zip 19122."},
+  {tool:{name:"find_user_id_by_name_zip",input:{first_name:"Yusuf",last_name:"Rossi",zip:"19122"}}},
+  {respond:"Thanks, Yusuf — your account is verified. Which order, and which items would you like to exchange?",
+   userReply:"Order #W2378156. I'd like to exchange the mechanical keyboard for a clicky-switch one, and the smart thermostat for a Google Home–compatible one."},
+  {tool:{name:"get_order_details",input:{order_id:"#W2378156"}}},
+  {tool:{name:"get_product_details",input:{product_id:"1656367028"}}},
+  {tool:{name:"get_product_details",input:{product_id:"4896585277"}}},
+  {respond:"Here's what I can do on order #W2378156: exchange the keyboard (1151293680) for the clicky/RGB/full-size variant 7706410293, and the thermostat (4983901480) for the Google-Assistant variant 7747408585. Any price difference goes to your credit card ending 9513926. Shall I proceed with both? (yes/no)",
+   userReply:"Yes, please do both in one go."},
+  {tool:{name:"exchange_delivered_order_items",input:exchangeInput}},
+  {respond:finalMsg, userReply:"###STOP###"},
+];}
+const DEMOS=[
+  {id:0,taskId:"retail-test-0",label:"correct",
+   firstUser:"Hi, I received a delivered order and I'd like to exchange a couple of the items.",
+   turns:demoTurns(EX_INPUT_OK,"All set! I've submitted the exchange for both the keyboard and the thermostat on order #W2378156. You'll get an email with return instructions. Anything else?")},
+  {id:1,taskId:"retail-test-0",label:"broken",
+   firstUser:"Hi, I received a delivered order and I'd like to exchange a couple of the items.",
+   turns:demoTurns(EX_INPUT_BAD,"Done! I've submitted the exchange for the thermostat on order #W2378156. Anything else?")},
+];
+let demoChoice=0;
+
+/* exact user-sim system prompts (verbatim from tau_bench/envs/user.py) */
+function userSystem(strategy,instr){
+  const inst="\n\nInstruction: "+instr+"\n";
+  if(strategy==="react") return `You are a user interacting with an agent.${inst}
+Rules:
+- First, generate a Thought about what to do next (this message will not be sent to the agent).
+- Then, generate a one line User Response to simulate the user's message (this message will be sent to the agent).
+- Do not give away all the instruction at once. Only provide the information that is necessary for the current step.
+- Do not hallucinate information that is not provided in the instruction. For example, if the agent asks for the order id but it is not mentioned in the instruction, do not make up an order id, just say you do not remember or have it.
+- If the instruction goal is satisified, generate '###STOP###' as the User Response without anything else to end the conversation.
+- Do not repeat the exact instruction in the conversation. Instead, use your own words to convey the same information.
+- Try to make the conversation as natural as possible, and stick to the personalities in the instruction.
+
+Format:
+
+Thought:
+<the thought>
+
+User Response:
+<the user response (this will be parsed and sent to the agent)>`;
+  return `You are a user interacting with an agent.${inst}
+Rules:
+- Just generate one line at a time to simulate the user's message.
+- Do not give away all the instruction at once. Only provide the information that is necessary for the current step.
+- Do not hallucinate information that is not provided in the instruction. For example, if the agent asks for the order id but it is not mentioned in the instruction, do not make up an order id, just say you do not remember or have it.
+- If the instruction goal is satisified, generate '###STOP###' as a standalone message without anything else to end the conversation.
+- Do not repeat the exact instruction in the conversation. Instead, use your own words to convey the same information.
+- Try to make the conversation as natural as possible, and stick to the personalities in the instruction.`;
+}
+function parseUser(strategy,raw){
+  if(strategy!=="react") return (raw||"").trim();
+  if((raw||"").includes("###STOP###")) return "###STOP###";
+  if(raw.includes("Thought:")) return raw.split("Thought:").slice(1).join("Thought:").trim();
+  if(raw.includes("User Response:")) return raw.split("User Response:").slice(1).join("User Response:").trim();
+  return raw.trim();
+}
+function anthTools(){return (TOOLS.retail||[]).map(t=>({name:t.function.name,description:t.function.description,input_schema:t.function.parameters}));}
+function wiki(){return PROMPTS.retail_wiki||"";}
+
+/* ---- API ---- */
+async function callClaude(model,system,messages,tools){
+  const key=(el("#key").value||"").trim(); if(!key) throw new Error("Enter your Anthropic API key.");
+  const body={model,max_tokens:1024,system,messages}; if(tools) body.tools=tools;
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+    headers:{"content-type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body:JSON.stringify(body)});
+  if(!r.ok) throw new Error("API "+r.status+": "+(await r.text()).slice(0,300));
+  return r.json();
+}
+const textOf=res=>(res.content||[]).filter(b=>b.type==="text").map(b=>b.text).join(" ").trim();
+
+/* ---- providers: live API vs scripted demo (identical loop) ---- */
+async function getAgentCompletion(){
+  if(S.mode==="demo"){
+    const turn=S.script.turns[S.ptr++];
+    if(!turn) return {blocks:[{type:"text",text:"(demo ended)"}],stop_reason:"end_turn"};
+    if(turn.tool) return {blocks:[{type:"tool_use",id:"demo_"+S.ptr,name:turn.tool.name,input:turn.tool.input}],stop_reason:"tool_use"};
+    S.pendingUser=turn.userReply;
+    return {blocks:[{type:"text",text:turn.respond}],stop_reason:"end_turn"};
+  }
+  const res=await callClaude(S.amodel,wiki(),S.agentMsgs,anthTools());
+  return {blocks:res.content||[],stop_reason:res.stop_reason};
+}
+async function getUserCompletion(){
+  if(S.mode==="demo"){ return {raw:S.pendingUser,parsed:S.pendingUser}; }
+  const res=await callClaude(S.umodel,S.sys,S.userMsgs,null);
+  const raw=textOf(res); return {raw,parsed:parseUser(S.strategy,raw)};
+}
+
+/* ---- session + episode loop (shared by live & demo) ---- */
+let S=null;
+function curTask(){return TASKS.find(t=>t.id===el("#task").value);}
+function setStatus(h){el("#status").innerHTML=h;}
+function setDStatus(h){el("#dstatus").innerHTML=h;}
+function lockLive(b){["initBtn","stepBtn","autoBtn"].forEach(id=>el("#"+id).disabled=b);}
+function lockDemo(b){["demoStart","demoStep","demoAuto"].forEach(id=>el("#"+id).disabled=b);}
+
+async function startEpisode(mode){
+  const t = mode==="demo" ? TASKS.find(x=>x.id===S_demoTask()) : curTask();
+  if(!t) return;
+  el("#task").value=t.id;
+  const strategy = mode==="demo"?"llm":el("#ustrat").value;
+  const umodel = mode==="demo"?"(scripted)":el("#umodel").value;
+  const amodel = mode==="demo"?"(scripted)":el("#amodel").value;
+  S={task:t,mode,db:E.freshDB(),strategy,umodel,amodel,sys:userSystem(strategy,t.instruction),
+     userMsgs:[{role:"user",content:GREETING}],agentMsgs:[],trace:[],respondTexts:[],
+     done:false,steps:0,reason:"",script:mode==="demo"?DEMOS[demoChoice]:null,ptr:0,pendingUser:null};
+  el("#reward").innerHTML=""; el("#instr").textContent=t.instruction;
+  const setBusy=mode==="demo"?setDStatus:setStatus;
+  setBusy(mode==="demo"?"user simulator (scripted) opening…":'<span class="spin"></span> user simulator generating first message…');
+  try{
+    let raw,parsed;
+    if(mode==="demo"){ raw=S.script.firstUser; parsed=raw; }
+    else { const res=await callClaude(umodel,S.sys,S.userMsgs,null); raw=textOf(res); parsed=parseUser(strategy,raw); }
+    S.userMsgs.push({role:"assistant",content:raw});
+    S.trace.push({kind:"usersim",phase:"reset",system:S.sys,messages:[{role:"user",content:GREETING}],raw,parsed});
+    S.agentMsgs=[{role:"user",content:parsed}];
+    render(true);
+    if(mode==="demo"){ lockDemo(false); el("#demoStart").disabled=true; setDStatus("ready — click <b>Next step</b>."); }
+    else { lockLive(false); el("#initBtn").disabled=true; setStatus("initialized — agent's turn."); }
+  }catch(e){ setBusy('<span style="color:var(--bad)">'+esc(e.message)+'</span>'); }
+}
+function S_demoTask(){ return DEMOS[demoChoice].taskId; }
+
+async function step(){
+  if(!S||S.done) return;
+  const busy = S.mode==="demo"?setDStatus:setStatus;
+  if(S.steps>=30){S.done=true;S.reason="reached max 30 steps";S.trace.push({kind:"end",reason:S.reason});render(true);await showReward();if(S.mode==="demo"){lockDemo(true);el("#demoStart").disabled=false;}return;}
+  busy(S.mode==="demo"?"agent (scripted) acting…":'<span class="spin"></span> agent ('+S.amodel+') thinking…');
+  try{
+    const comp=await getAgentCompletion();
+    S.steps++;
+    const blocks=comp.blocks;
+    const firstTool=blocks.find(b=>b.type==="tool_use");
+    const texts=blocks.filter(b=>b.type==="text").map(b=>b.text).join("\n").trim();
+    const ev={kind:"agent",system:wiki(),messages:JSON.parse(JSON.stringify(S.agentMsgs)),stop_reason:comp.stop_reason,blocks};
+    if(firstTool){
+      ev.action={type:"tool",name:firstTool.name,args:firstTool.input}; S.trace.push(ev);
+      const obs=E.invokeTool("retail",firstTool.name,firstTool.input,S.db);
+      S.trace.push({kind:"tool",name:firstTool.name,args:firstTool.input,obs,mutating:E.isMut(firstTool.name)});
+      S.agentMsgs.push({role:"assistant",content:[firstTool]});
+      S.agentMsgs.push({role:"user",content:[{type:"tool_result",tool_use_id:firstTool.id,content:String(obs)}]});
+      render(true); busy("tool executed — agent continues."); return;
+    } else {
+      ev.action={type:"respond",content:texts}; S.trace.push(ev);
+      S.respondTexts.push(texts);
+      busy(S.mode==="demo"?"user (scripted) replying…":'<span class="spin"></span> user simulator responding…');
+      S.userMsgs.push({role:"user",content:texts});
+      const uc=await getUserCompletion();
+      S.trace.push({kind:"usersim",phase:"step",system:S.sys,messages:JSON.parse(JSON.stringify(S.userMsgs)),raw:uc.raw,parsed:uc.parsed});
+      S.userMsgs.push({role:"assistant",content:uc.raw});
+      S.agentMsgs.push({role:"assistant",content:texts});
+      S.agentMsgs.push({role:"user",content:uc.parsed});
+      if((uc.parsed||"").includes("###STOP###")){S.done=true;S.reason="user emitted ###STOP###";}
+    }
+    if(S.done){S.trace.push({kind:"end",reason:S.reason}); render(true); await showReward(); if(S.mode==="demo"){lockDemo(true);el("#demoStart").disabled=false;} }
+    else { render(true); busy("step "+S.steps+" done — agent's turn."); }
+  }catch(e){ busy('<span style="color:var(--bad)">'+esc(e.message)+'</span>'); }
+}
+async function auto(){ if(!S)return; const lk=S.mode==="demo"?lockDemo:lockLive; lk(true);
+  while(S && !S.done){ await step(); }
+  if(S&&S.mode==="live") lockLive(false);
+}
+
+async function showReward(){
+  const busy = S.mode==="demo"?setDStatus:setStatus;
+  busy('<span class="spin"></span> computing reward (replaying gold actions, comparing DB states)…');
+  const rr=await E.calculateReward(S.task,S.db,S.respondTexts);
+  const outs=Object.entries(rr.outputs||{});
+  el("#reward").innerHTML=`<div class="panel-card ${rr.reward?'tint-good':'tint-bad'}">
+    <h3 style="margin-top:0">Reward = <span style="color:${rr.reward?'var(--good)':'var(--bad)'};font-size:1.3em">${rr.reward}</span>
+      <span class="small faint">(episode ended: ${esc(S.reason)})</span></h3>
+    <div class="gradebox" style="margin:8px 0">
+      <div><span class="led ${rr.r_actions?'on':'off'}"></span><b>r_actions</b> — final DB ${rr.r_actions?'matches':'does NOT match'} gold</div>
+      <div><span class="led ${rr.r_outputs?'on':'off'}"></span><b>r_outputs</b> — ${outs.length?(rr.r_outputs?'all present':'missing some'):'none required → 1'}</div>
+    </div>
+    <div class="lbl">how r_actions is computed — SHA-256 of the canonicalized database (the tau-bench comparison)</div>
+    <pre class="msgs">agent's final DB  : ${rr.agentHash}
+gold-replay DB    : ${rr.gtHash}
+identical?        : ${rr.r_actions}</pre>
+    ${outs.length?`<div class="lbl">required outputs (substring of some respond, lowercased, commas removed)</div>${outs.map(([o,f])=>`<span class="badge ${f?'good':'bad'}">${f?'✓':'✗'} "${esc(o)}"</span>`).join(" ")}`:`<div class="small faint">This task specifies no required outputs, so r_outputs = 1 automatically.</div>`}
+    <div class="lbl" style="margin-top:12px">gold write actions replayed on a fresh DB to build the target state</div>
+    ${rr.goldApplied.filter(g=>E.isMut(g.name)).map(g=>`<div class="goldcall mut">${esc(g.name)}(${esc(JSON.stringify(g.kwargs))})</div>`).join("")||'<div class="muted small">none — correct outcome is an unchanged DB</div>'}
+    <div class="lbl" style="margin-top:12px">database diff — records where your agent's DB differs from gold ${rr.diff.length?`(${rr.diff.length})`:""}</div>
+    ${rr.diff.length? rr.diff.map(d=>`<div class="diffrow"><div class="dh">${d.table} · ${esc(d.id)} — differs</div><div class="dg">
+        <div class="a"><div class="lbl">your agent's DB</div><pre class="msgs">${esc(JSON.stringify(d.agent,null,1)).slice(0,1600)}</pre></div>
+        <div class="g"><div class="lbl">gold DB</div><pre class="msgs">${esc(JSON.stringify(d.gold,null,1)).slice(0,1600)}</pre></div>
+      </div></div>`).join("") : '<div class="note" style="margin-top:6px"><b>✓ The final database state is identical to the gold outcome.</b></div>'}
+  </div>`;
+  busy("done. reward = "+rr.reward);
+  el("#reward").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+
+/* ---- rendering ---- */
+function renderMsgs(msgs){
+  return msgs.map(m=>{
+    let c=m.content;
+    if(Array.isArray(c)) c=c.map(b=>b.type==="tool_use"?`[tool_use ${b.name}(${JSON.stringify(b.input)})]`:b.type==="tool_result"?`[tool_result ${String(b.content).slice(0,300)}]`:(b.text||"")).join("\n");
+    return `<span class="role ${m.role}">${m.role}:</span> ${esc(String(c).slice(0,1200))}`;
+  }).join("\n");
+}
+function render(markLast){
+  el("#trace").innerHTML=S.trace.map((e,i)=>{
+    const isLast=markLast&&i===S.trace.length-1?" new":"";
+    if(e.kind==="usersim") return `<div class="ev usersim${isLast}"><div class="hd">🧑 USER SIMULATOR · ${e.phase} · ${esc(S.umodel)} (strategy=${esc(S.strategy)})</div><div class="bd">
+        <details class="coll"><summary>system prompt + ${e.messages.length} message(s) sent →</summary><div class="inner">
+          <div class="lbl">system</div><pre class="msgs">${esc(e.system)}</pre>
+          <div class="lbl">messages</div><pre class="msgs">${esc(renderMsgs(e.messages))}</pre></div></details>
+        <div class="lbl">raw output</div><div class="out">${esc(e.raw)}</div>
+        ${e.parsed!==e.raw?`<div class="lbl">→ parsed & sent to agent</div><div class="out" style="color:var(--acc)">${esc(e.parsed)}</div>`:`<div class="arrow">↳ sent to the agent as the customer's message</div>`}
+      </div></div>`;
+    if(e.kind==="agent") return `<div class="ev agent${isLast}"><div class="hd">🛠️ AGENT · ${esc(S.amodel)} · stop_reason=${esc(e.stop_reason||"")}</div><div class="bd">
+        <details class="coll"><summary>system (policy wiki) + ${e.messages.length} message(s) sent →</summary><div class="inner">
+          <div class="lbl">system</div><pre class="msgs">${esc(e.system).slice(0,4000)}</pre>
+          <div class="lbl">messages</div><pre class="msgs">${esc(renderMsgs(e.messages))}</pre></div></details>
+        <div class="lbl">raw output blocks</div><pre class="msgs">${esc(JSON.stringify(e.blocks,null,1)).slice(0,1600)}</pre>
+        <div class="lbl">→ parsed action</div>
+        ${e.action.type==="tool"?`<div class="goldcall ${E.isMut(e.action.name)?'mut':''}">${E.isMut(e.action.name)?'✎ ':''}${esc(e.action.name)}(${esc(JSON.stringify(e.action.args))})</div>`
+          :`<div class="out" style="color:var(--acc)">respond → "${esc(e.action.content)}"</div>`}
+      </div></div>`;
+    if(e.kind==="tool") return `<div class="ev tool${isLast}"><div class="hd">⚙️ ENV · tool ${esc(e.name)} ${e.mutating?'<span class="badge mut">✎ mutates DB</span>':'<span class="badge read">read</span>'}</div><div class="bd">
+        <div class="lbl">input</div><pre class="msgs">${esc(JSON.stringify(e.args))}</pre>
+        <div class="lbl">observation returned to agent</div><pre class="msgs">${esc(String(e.obs)).slice(0,1400)}</pre></div></div>`;
+    if(e.kind==="end") return `<div class="ev end${isLast}"><div class="hd">⏹ EPISODE END · ${esc(e.reason)}</div></div>`;
+    return "";
+  }).join("");
+  if(markLast){ const cards=el("#trace").children; if(cards.length) cards[cards.length-1].scrollIntoView({behavior:"smooth",block:"center"}); }
+}
+
+/* ---- boot ---- */
+function resetAll(){ S=null; el("#trace").innerHTML=""; el("#reward").innerHTML="";
+  el("#initBtn").disabled=false; el("#stepBtn").disabled=true; el("#autoBtn").disabled=true;
+  el("#demoStart").disabled=false; el("#demoStep").disabled=true; el("#demoAuto").disabled=true;
+  setStatus(""); setDStatus(""); }
+function boot(){
+  el("#task").innerHTML=TASKS.map(t=>`<option value="${t.id}">retail #${t.idx} — ${esc(t.instruction.slice(0,70))}…</option>`).join("");
+  ["#amodel","#umodel"].forEach((s,i)=>el(s).innerHTML=MODELS.map(m=>`<option ${((i===0&&m==="claude-sonnet-4-6")||(i===1&&m==="claude-haiku-4-5-20251001"))?'selected':''}>${m}</option>`).join(""));
+  el("#ref-user").textContent=userSystem("llm","<the hidden per-task instruction>");
+  el("#ref-wiki").textContent=(PROMPTS.retail_wiki||"").slice(0,1200)+" …";
+  const showInstr=()=>{const t=curTask();el("#instr").textContent=t?t.instruction:"—";};
+  // demo wiring
+  document.querySelectorAll("#demoSeg button").forEach(b=>b.onclick=()=>{
+    document.querySelectorAll("#demoSeg button").forEach(x=>x.classList.remove("on"));b.classList.add("on");
+    demoChoice=+b.dataset.demo; resetAll(); });
+  el("#demoStart").onclick=()=>startEpisode("demo");
+  el("#demoStep").onclick=step; el("#demoAuto").onclick=auto;
+  // live wiring
+  el("#task").onchange=()=>{resetAll();showInstr();};
+  el("#initBtn").onclick=()=>startEpisode("live"); el("#stepBtn").onclick=step; el("#autoBtn").onclick=auto;
+  el("#resetBtn").onclick=resetAll;
+  el("#key").value=localStorage.getItem("tau_key")||"";
+  el("#key").onchange=e=>localStorage.setItem("tau_key",e.target.value.trim());
+  // map demo step/auto buttons to the shared loop (they share ids? no — separate). Bind:
+  el("#demoStep").onclick=step; el("#demoAuto").onclick=auto;
+  showInstr();
+}
+boot();
+</script>
+</body>
+</html>

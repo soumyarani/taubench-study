@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SABER — Small Actions, Big Errors (critical reading)</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav class="top"><div class="wrap">
+  <span class="brand">τ<b>·</b>bench study</span>
+  <a class="tab" href="index.html">Overview</a>
+  <a class="tab" href="instances.html">Instance explorer</a>
+  <a class="tab" href="pipeline.html">Pipeline</a>
+  <a class="tab active" href="saber.html">SABER</a>
+  <a class="tab" href="idea.html">The idea</a>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <span class="kicker">Critical reading · arXiv 2512.07850</span>
+  <h1>SABER — <span class="tau">Small Actions, Big Errors</span></h1>
+  <p class="lead">Cuadron, Yu, Liu, Gupta (Amazon AGI; Cuadron @ UC Berkeley), ICLR 2026. The cleanest result
+  to come out of the τ-bench critiques: <b>agent failure concentrates in the handful of steps that change
+  state.</b> Protect those, and most of the reliability gap closes — for a fraction of the cost.</p>
+  <div class="pills">
+    <span class="badge mut">diagnosis: mutating steps dominate failure</span>
+    <span class="badge good">ships τ-Bench Verified</span>
+    <span class="badge warn">safeguard: under-baselined</span>
+  </div>
+  <p class="small faint" style="margin-top:14px">⚠ Don't confuse with the unrelated <a href="https://arxiv.org/abs/2606.01317">other "SABER"</a>
+  (coding-agent operational safety). This is the τ-bench one.</p>
+</div></header>
+
+<main class="wrap">
+
+<section>
+<h2>In one paragraph</h2>
+<p>SABER is two things bolted together. First, a <b>diagnosis</b>: decompose an agent's trajectory into
+<span class="badge mut">mutating</span> steps (writes — refunds, cancellations, rebookings, file edits) and
+<span class="badge read">non-mutating</span> steps (reads, searches, status checks), and show statistically
+that errors on mutating steps are what actually kill tasks. Second, a <b>test-time safeguard</b> (also called
+SABER) that spends its whole "protection budget" only on those mutating steps via three mechanisms. As a side
+deliverable it releases <b>τ-Bench Verified</b>, a corrected version of τ-bench's tasks.</p>
+
+<div class="flow">
+  <div class="step"><div class="n">MECHANISM 1</div><h4>Mutation-gated verification</h4><p>Force an explicit user confirmation right before any state change — not on every step.</p></div>
+  <div class="step"><div class="n">MECHANISM 2</div><h4>Targeted Reflection</h4><p>At the moment of mutation, inject a high-salience reminder of the key constraints, to counter "lost-in-the-middle" drift.</p></div>
+  <div class="step"><div class="n">MECHANISM 3</div><h4>Block-based context filtering</h4><p>Surface only verification-critical / goal-salient history to reduce context poisoning.</p></div>
+</div>
+</section>
+
+<section>
+<h2>What they figured out</h2>
+<div class="grid g2">
+  <div class="card tint-bad"><h3>Not all actions matter equally</h3>
+    <p>Logistic regression on execution traces: each additional deviation on a <b>mutating</b> action cuts the
+    odds of task success by up to <b>~92% (airline)</b> and <b>~96% (retail)</b> for SoTA models. Deviations
+    on <b>non-mutating</b> actions have little-to-no measurable effect (mostly p&nbsp;&gt;&nbsp;0.05).</p>
+    <p class="small muted mono">Airline odds ratios: Claude Sonnet 4 ≈0.04 · GPT-5 ≈0.13 · Qwen3-Thinking ≈0.09.</p></div>
+  <div class="card"><h3>Errors grow with context length</h3>
+    <p>As conversations lengthen, agents drift from their role and act on <b>stale / superseded</b> constraints
+    — the failure mode the safeguard's reflection + context-filtering directly target.</p></div>
+  <div class="card tint-good"><h3>The safeguard helps, consistently</h3>
+    <p>Qwen3-Thinking <b>+28%</b> relative on airline, +11% retail, +7% SWE-Bench Verified; Claude +9%/+7%.
+    On τ-Bench-Verified airline: Qwen3 58.5→<b>78.2</b>, Claude 72.1→<b>80.3</b>.</p></div>
+  <div class="card"><h3>τ-bench itself is partly broken</h3>
+    <p>Annotation errors + underspecified tasks create artificial <b>ceiling effects</b> that cap scores
+    regardless of agent skill — so original τ-bench <b>under-measures</b> capability.</p></div>
+</div>
+</section>
+
+<section>
+<h2>The critical claim — and whether it holds</h2>
+<p>The thesis is two-pronged. Each gets a separate verdict.</p>
+
+<div class="panel-card">
+  <span class="badge mut">Claim A · diagnostic</span>
+  <h3 style="margin-top:6px">"Fragility is concentrated in mutating actions; protect those and you get most of the reliability win."</h3>
+  <p><b style="color:var(--good)">Verdict: well supported.</b> Operationalized as a formal "decisive deviation"
+  (insert an action at step <em>t</em>; does it flip a passing trajectory to failing?), tested with logistic
+  regression across 3 frontier models on ~297 airline + ~690 retail tasks plus SWE-Bench Verified. The effect
+  is large, directionally consistent across models, and cleanly separated from the non-mutating control. A
+  genuinely falsifiable, strong result.</p>
+</div>
+
+<div class="panel-card">
+  <span class="badge warn">Claim B · the safeguard works because it's targeted</span>
+  <h3 style="margin-top:6px">"Mutation-<em>gated</em> verification beats verifying everything / prior methods."</h3>
+  <p><b style="color:var(--warn)">Verdict: real but thinner than the framing implies.</b> Gains are shown with
+  per-component ablations averaged over 3 runs — but there is <b>no comparison against existing test-time
+  methods</b> (Reflexion, self-consistency/voting, generic verify-<em>all</em>-steps). So the paper proves
+  "SABER &gt; no SABER," not "targeting the mutating steps &gt; verifying every step." Given the headline selling
+  point is efficiency ("only gate ~14–18% of steps"), the missing <b>verify-all baseline</b> is exactly the
+  comparison that would prove targeting — rather than just adding verification — is what matters.</p>
+</div>
+
+<div class="panel-card">
+  <span class="badge good">Claim C · τ-bench needs correcting</span>
+  <h3 style="margin-top:6px">"A meaningful share of τ-bench failures are benchmark artifacts; use τ-Bench Verified."</h3>
+  <p><b style="color:var(--good)">Verdict: supported, and externally validated.</b> They enumerate concrete fix
+  categories (policy-violating expected actions, DB/ID errors, impossible constraints, ambiguous instructions,
+  missing fallbacks). The strongest signal: Sierra's <b>official τ³-bench adopted the majority of these fixes</b>
+  — third-party confirmation the errors were real, not cherry-picked. (Minor flag: fix counts differ between the
+  paper, ≈24 airline/18 retail, and the τ³ blog, 27/26.)</p>
+</div>
+</section>
+
+<section>
+<h2>What the analysis misses (blind spots)</h2>
+<table>
+<thead><tr><th>Gap</th><th>Why it matters</th></tr></thead>
+<tbody>
+<tr><td><b>Circularity in the headline number</b></td><td>The biggest +14–20pp gains are on <em>their own</em> τ-Bench Verified. Since they both corrected the benchmark <em>and</em> measured on it, gain-from-safeguard vs. gain-from-removed-ceilings isn't fully decomposed.</td></tr>
+<tr><td><b>No competing baselines</b></td><td>No Reflexion / ToT / self-consistency / verify-all. The single biggest evidentiary hole.</td></tr>
+<tr><td><b>User-simulator dependence</b></td><td>Mutation-gated verification literally asks the (simulated) user to confirm. A compliant sim inflates gains; a real impatient/adversarial user could ignore or be annoyed by the confirmation. Acknowledged, not measured. (See <a href="index.html">the user-sim critiques</a>.)</td></tr>
+<tr><td><b>"Mutating" is benchmark-defined</b></td><td>Trivial to label in τ-bench's clean APIs; ambiguous in the wild (a "search" that writes logs; chained side effects). Generalizability asserted, not demonstrated.</td></tr>
+<tr><td><b>pass^1 focus</b></td><td>τ-bench's signature contribution is pass^k <em>reliability</em>. SABER leans on pass^1-style numbers; less clear it improves consistency (pass^k) vs. mean success.</td></tr>
+<tr><td><b>Cost/latency under-quantified</b></td><td>Three runs + confirmations + context filtering, all framed as "lightweight," without a clean overhead accounting.</td></tr>
+</tbody></table>
+</section>
+
+<section>
+<h2>Is it overkill? &nbsp; What does it assume?</h2>
+<div class="grid g2">
+  <div class="card">
+    <h3>Overkill? Partly.</h3>
+    <p>The <b>diagnosis</b> is the opposite of overkill — a sharp single-variable insight. The <b>safeguard</b>,
+    though, stacks <b>three</b> interventions, and the ablations suggest verification + reflection carry most of
+    the load while block-based context filtering adds smaller, noisier gains (SWE-Bench only +2.5pp). For a paper
+    whose thesis is "target the few actions that matter," a 3-part pipeline is mildly ironic — a leaner
+    "mutation-gated reflect-and-confirm" likely captures ~80% of the benefit.</p>
+  </div>
+  <div class="card">
+    <h3>Assumptions (incl. unstated)</h3>
+    <ul class="small" style="color:#d6dde8;margin:0;padding-left:18px">
+      <li>Mutating vs non-mutating is <b>cleanly separable and known a priori</b> from tool schemas.</li>
+      <li>The <b>user simulator is a faithful proxy</b> for humans — the exact assumption a sibling paper ("Lost in Simulation") argues is shaky.</li>
+      <li><b>Deviation from a gold trajectory ⇒ cause of failure</b> — but a valid non-canonical path could be miscounted as a deviation.</li>
+      <li>Their <b>re-annotated gold is now actually correct</b> (trusting their own fixes).</li>
+      <li>Odds-ratio causal language on <b>observational</b> trajectory data — "reduces odds" is associational unless the counterfactual insertion is truly controlled.</li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<section>
+<h2>Why this matters for your work</h2>
+<div class="note">
+  SABER's mutating/non-mutating split is the <b>same cut</b> your lab's serializability taxonomy makes:
+  <span class="badge read">reads = INDEPENDENT</span> vs <span class="badge mut">writes = where conflicts and
+  failures live</span>. SABER shows, empirically, that in a single-agent setting the <b>writes are where
+  reliability is won or lost</b>. Your <a href="idea.html">non-ergodic shopping benchmark</a> pushes the same
+  intuition into a setting τ-bench/SABER never touch: where a write (spend money, miss a deadline) is
+  <b>irreversible</b>, so there is no "confirm and retry."
+</div>
+</section>
+
+<hr>
+<p class="small muted"><b>One-line verdict.</b> SABER's <em>diagnosis</em> — failure concentrates in a small set of
+state-mutating actions — is clean, well-evidenced, and genuinely useful. Its <em>safeguard</em> works but is
+under-baselined and somewhat over-stacked. Its most durable contribution is <b>τ-Bench Verified</b>, validated
+by adoption into the official τ³-bench.</p>
+
+</main>
+
+<footer><div class="wrap">
+  <b>Sources.</b> SABER paper <a href="https://arxiv.org/abs/2512.07850">arXiv 2512.07850</a>
+  (<a href="https://arxiv.org/html/2512.07850v1">HTML</a>) ·
+  τ-Bench Verified <a href="https://github.com/amazon-agi/tau2-bench-verified">github.com/amazon-agi/tau2-bench-verified</a> ·
+  τ³ fixes blog <a href="https://taubench.com/blog/tau3-task-fixes.html">taubench.com</a> ·
+  original τ-bench <a href="https://arxiv.org/abs/2406.12045">2406.12045</a>.
+</div></footer>
+</body>
+</html>

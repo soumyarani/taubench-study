@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>τ-bench instance explorer + live agent</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  .app{display:grid;grid-template-columns:330px 1fr;gap:0;height:calc(100vh - 58px)}
+  @media(max-width:900px){.app{grid-template-columns:1fr;height:auto}}
+  .sidebar{border-right:1px solid var(--line);height:100%;overflow:hidden;display:flex;flex-direction:column;background:var(--bg2)}
+  .filters{padding:12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+  .filters input,.filters select{width:100%;background:#0d141d;border:1px solid var(--line2);color:var(--ink);
+     padding:8px 10px;border-radius:9px;font-size:.86rem;font-family:var(--sans)}
+  .seg{display:flex;gap:4px}
+  .seg button{flex:1;background:#0d141d;border:1px solid var(--line2);color:var(--muted);padding:6px;border-radius:8px;cursor:pointer;font-size:.78rem}
+  .seg button.on{background:var(--panel2);color:#fff;border-color:var(--acc)}
+  .ilist{overflow-y:auto;flex:1}
+  .irow{padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;gap:8px;align-items:flex-start}
+  .irow:hover{background:#0f151e}
+  .irow.sel{background:#10201d;border-left:3px solid var(--acc)}
+  .irow .idx{font-family:var(--mono);font-size:.72rem;color:var(--faint);min-width:54px}
+  .irow .t{font-size:.82rem;color:var(--ink);line-height:1.4;max-height:3.3em;overflow:hidden}
+  .irow .mc{font-family:var(--mono);font-size:.68rem}
+  .main{height:100%;overflow-y:auto;padding:22px 26px}
+  @media(max-width:900px){.main{height:auto}}
+  .detail-tabs{display:flex;gap:6px;margin:6px 0 16px}
+  .detail-tabs button{background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:8px 16px;border-radius:10px;cursor:pointer;font-weight:560}
+  .detail-tabs button.on{background:var(--panel2);color:#fff;border-color:var(--acc)}
+  .goldcall{font-family:var(--mono);font-size:.82rem;background:#0d141d;border:1px solid var(--line);border-left:3px solid var(--acc2);
+     border-radius:0 9px 9px 0;padding:9px 12px;margin:7px 0;white-space:pre-wrap;word-break:break-word}
+  .goldcall.mut{border-left-color:var(--mut);background:#150f1e}
+  .chat{display:flex;flex-direction:column;gap:10px;margin:14px 0}
+  .msg{max-width:88%;padding:10px 14px;border-radius:13px;font-size:.9rem;white-space:pre-wrap;line-height:1.5}
+  .msg.user{align-self:flex-start;background:#16202e;border:1px solid var(--line2);border-bottom-left-radius:4px}
+  .msg.agent{align-self:flex-end;background:#10231f;border:1px solid #1f4d44;border-bottom-right-radius:4px}
+  .msg.tool{align-self:stretch;max-width:100%;background:#140f1e;border:1px solid #46306a;font-family:var(--mono);font-size:.78rem;color:#d7c5f0}
+  .msg .who{font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:3px}
+  .panel-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0}
+  .cfg{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .cfg label{font-size:.74rem;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:3px}
+  .cfg input,.cfg select{width:100%;background:#0d141d;border:1px solid var(--line2);color:var(--ink);padding:8px;border-radius:8px;font-size:.84rem;font-family:var(--sans)}
+  .composer{display:flex;gap:8px;margin-top:10px}
+  .composer textarea{flex:1;background:#0d141d;border:1px solid var(--line2);color:var(--ink);border-radius:10px;padding:10px;font-family:var(--sans);font-size:.9rem;resize:vertical;min-height:46px}
+  .gradebox{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+  .led{width:11px;height:11px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle}
+  .led.on{background:var(--good);box-shadow:0 0 8px var(--good)} .led.off{background:var(--bad)}
+  details.raw summary{cursor:pointer;color:var(--muted);font-size:.8rem}
+  pre.json{background:#0b1118;border:1px solid var(--line);border-radius:9px;padding:11px;overflow:auto;font-size:.76rem;color:#bcd;max-height:300px}
+</style>
+</head>
+<body>
+<nav class="top"><div class="wrap">
+  <span class="brand">τ<b>·</b>bench study</span>
+  <a class="tab" href="index.html">Overview</a>
+  <a class="tab active" href="instances.html">Instance explorer</a>
+  <a class="tab" href="pipeline.html">Pipeline</a>
+  <a class="tab" href="saber.html">SABER</a>
+  <a class="tab" href="idea.html">The idea</a>
+</div></nav>
+
+<div class="app">
+  <!-- ---------- SIDEBAR ---------- -->
+  <aside class="sidebar">
+    <div class="filters">
+      <div class="seg" id="domSeg">
+        <button data-d="all" class="on">All</button>
+        <button data-d="retail">Retail</button>
+        <button data-d="airline">Airline</button>
+      </div>
+      <input id="search" placeholder="Search instruction / user id…">
+      <div class="seg" id="mutSeg">
+        <button data-m="all" class="on">Any</button>
+        <button data-m="write">Has writes</button>
+        <button data-m="readonly">Read-only</button>
+      </div>
+      <div class="small faint" id="count">—</div>
+    </div>
+    <div class="ilist" id="ilist"></div>
+  </aside>
+
+  <!-- ---------- MAIN ---------- -->
+  <main class="main" id="main">
+    <div class="muted">Loading instances…</div>
+  </main>
+</div>
+
+<!-- data -->
+<script src="data/data_tasks.js"></script>
+<script src="data/data_tools.js"></script>
+<script src="data/data_prompts.js"></script>
+<script src="data/data_retail_db.js"></script>
+<script>
+/* ============================================================= *
+ *  τ-bench instance explorer + live agent (self-contained)
+ * ============================================================= */
+const TASKS = window.TAU_TASKS||[];
+const TOOLS = window.TAU_TOOLS||{retail:[],airline:[]};
+const PROMPTS = window.TAU_PROMPTS||{};
+const RETAIL_DB = window.TAU_RETAIL_DB||{users:{},orders:{},products:{}};
+
+const MUTATING = new Set([
+  // retail
+  "cancel_pending_order","return_delivered_order_items","exchange_delivered_order_items",
+  "modify_pending_order_items","modify_pending_order_address","modify_pending_order_payment",
+  "modify_user_address","cancel_pending_order_items","partial_return_and_exchange",
+  // airline
+  "book_reservation","cancel_reservation","send_certificate","update_reservation_baggages",
+  "update_reservation_flights","update_reservation_passengers"
+]);
+const isMut = n => MUTATING.has(n);
+
+/* ---------- sidebar state ---------- */
+let fDom="all", fMut="all", fQ="", selId=null;
+const el = s => document.querySelector(s);
+
+function passFilter(t){
+  if(fDom!=="all" && t.domain!==fDom) return false;
+  const hasW = t.actions.some(a=>isMut(a.name));
+  if(fMut==="write" && !hasW) return false;
+  if(fMut==="readonly" && hasW) return false;
+  if(fQ){const q=fQ.toLowerCase(); if(!((t.instruction||"").toLowerCase().includes(q)||(t.user_id||"").toLowerCase().includes(q))) return false;}
+  return true;
+}
+function renderList(){
+  const list = TASKS.filter(passFilter);
+  el("#count").textContent = `${list.length} of ${TASKS.length} tasks`;
+  el("#ilist").innerHTML = list.map(t=>{
+    const w = t.actions.filter(a=>isMut(a.name)).length;
+    const badge = w? `<span class="badge mut mc">${w}✎</span>` : `<span class="badge read mc">read</span>`;
+    return `<div class="irow ${t.id===selId?'sel':''}" data-id="${t.id}">
+      <div class="idx">${t.domain.slice(0,3)}·${t.idx}</div>
+      <div style="flex:1"><div class="t">${esc(t.instruction).slice(0,140)}</div>
+        <div style="margin-top:5px">${badge} <span class="faint mc" style="font-size:.66rem">${t.actions.length} calls</span></div></div>
+    </div>`;
+  }).join("") || `<div class="small faint" style="padding:16px">No matches.</div>`;
+  document.querySelectorAll(".irow").forEach(r=>r.onclick=()=>select(r.dataset.id));
+}
+function esc(s){return (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+/* ---------- detail render ---------- */
+let detailTab="gold";
+function select(id){ selId=id; renderList(); renderDetail(); el("#main").scrollTop=0; }
+function curTask(){ return TASKS.find(t=>t.id===selId); }
+
+function renderDetail(){
+  const t=curTask(); if(!t){el("#main").innerHTML='<div class="muted">Pick an instance from the left.</div>';return;}
+  const writes=t.actions.filter(a=>isMut(a.name));
+  el("#main").innerHTML = `
+    <div class="tag-row" style="margin-bottom:6px">
+      <span class="badge dom">${t.domain}</span>
+      <span class="badge">#${t.idx} · ${t.id}</span>
+      <span class="badge">user: ${esc(t.user_id||"—")}</span>
+      ${writes.length?`<span class="badge mut">${writes.length} mutating</span>`:`<span class="badge read">read-only task</span>`}
+      ${t.outputs.length?`<span class="badge warn">${t.outputs.length} required output(s)</span>`:""}
+    </div>
+    <div class="detail-tabs">
+      <button class="${detailTab==='gold'?'on':''}" onclick="setTab('gold')">Gold answer</button>
+      <button class="${detailTab==='live'?'on':''}" onclick="setTab('live')">▶ Live agent</button>
+    </div>
+    <div id="tabbody"></div>`;
+  detailTab==='gold'? renderGold(t) : renderLive(t);
+}
+function setTab(x){detailTab=x;renderDetail();}
+
+function renderGold(t){
+  const acts = t.actions.map(a=>{
+    const m=isMut(a.name);
+    const args=Object.entries(a.kwargs||{}).map(([k,v])=>`${k}=${JSON.stringify(v)}`).join(", ");
+    return `<div class="goldcall ${m?'mut':''}">${m?'<span class="badge mut" style="margin-right:6px">✎ writes DB</span>':'<span class="badge read" style="margin-right:6px">reads</span>'}${esc(a.name)}(${esc(args)})</div>`;
+  }).join("") || `<div class="muted small">No actions — this task is answerable with reads only (the correct DB change is <b>none</b>).</div>`;
+  el("#tabbody").innerHTML = `
+    <h3>Hidden user instruction <span class="faint small">(the user-simulator's secret script)</span></h3>
+    <div class="panel-card">${esc(t.instruction)}</div>
+    <h3>Gold action sequence <span class="faint small">(grading compares only the <span style="color:var(--mut)">mutating</span> calls to the final DB)</span></h3>
+    ${acts}
+    <h3>Required outputs <span class="faint small">(must appear as substrings in the agent's replies — r_output)</span></h3>
+    ${t.outputs.length? t.outputs.map(o=>`<span class="badge warn" style="margin:3px">"${esc(o)}"</span>`).join("") : '<div class="muted small">None.</div>'}
+    <div class="note blue" style="margin-top:20px"><b>How this is graded.</b> reward = (final DB identical to gold) × (all required outputs present). The wording of the chat and any read-only calls are ignored. Try to reproduce it yourself in <b>Live agent</b>.</div>`;
+}
+
+/* ============================================================= *
+ *  RETAIL TOOL BACKEND (faithful port of sierra-research/tau-bench)
+ * ============================================================= */
+function freshDB(){ return JSON.parse(JSON.stringify(RETAIL_DB)); }
+function J(x){return JSON.stringify(x);}
+const round2=x=>Math.round((x+Number.EPSILON)*100)/100;
+
+const RETAIL_BACKEND = {
+  think:({thought})=>"",
+  calculate:({expression})=>{ if(!/^[-0-9+*/(). ]+$/.test(expression||""))return "Error: invalid characters in expression";
+    try{return String(round2(Function('"use strict";return ('+expression+')')()));}catch(e){return "Error: "+e.message;} },
+  transfer_to_human_agents:({summary})=>"Transfer successful — a human agent will follow up.",
+  list_all_product_types:(_,db)=>{const o={};Object.values(db.products).forEach(p=>o[p.name]=p.product_id);
+    return J(Object.fromEntries(Object.entries(o).sort()));},
+  find_user_id_by_name_zip:({first_name,last_name,zip},db)=>{for(const[id,p]of Object.entries(db.users)){
+    if(p.name.first_name.toLowerCase()===(first_name||"").toLowerCase()&&p.name.last_name.toLowerCase()===(last_name||"").toLowerCase()&&p.address.zip===zip)return id;}return "Error: user not found";},
+  find_user_id_by_email:({email},db)=>{for(const[id,p]of Object.entries(db.users)){if((p.email||"").toLowerCase()===(email||"").toLowerCase())return id;}return "Error: user not found";},
+  get_user_details:({user_id},db)=> db.users[user_id]? J(db.users[user_id]) : "Error: user not found",
+  get_order_details:({order_id},db)=> db.orders[order_id]? J(db.orders[order_id]) : "Error: order not found",
+  get_product_details:({product_id},db)=> db.products[product_id]? J(db.products[product_id]) : "Error: product not found",
+  cancel_pending_order:({order_id,reason},db)=>{const o=db.orders[order_id]; if(!o)return "Error: order not found";
+    if(o.status!=="pending")return "Error: non-pending order cannot be cancelled";
+    if(!["no longer needed","ordered by mistake"].includes(reason))return "Error: invalid reason";
+    o.status="cancelled";o.cancel_reason=reason;return J(o);},
+  return_delivered_order_items:({order_id,item_ids,payment_method_id},db)=>{const o=db.orders[order_id]; if(!o)return "Error: order not found";
+    if(o.status!=="delivered")return "Error: non-delivered order cannot be returned";
+    const u=db.users[o.user_id]; if(!u.payment_methods[payment_method_id])return "Error: payment method not found";
+    if(!payment_method_id.includes("gift_card")&&payment_method_id!==o.payment_history[0].payment_method_id)return "Error: payment method should be either the original payment method or a gift card";
+    const all=o.items.map(i=>i.item_id);for(const it of item_ids){if(item_ids.filter(x=>x===it).length>all.filter(x=>x===it).length)return "Error: some item not found";}
+    o.status="return requested";o.return_items=[...item_ids].sort();o.return_payment_method_id=payment_method_id;return J(o);},
+  exchange_delivered_order_items:({order_id,item_ids,new_item_ids,payment_method_id},db)=>swapItems(db,order_id,item_ids,new_item_ids,payment_method_id,"delivered","exchange requested"),
+  modify_pending_order_items:({order_id,item_ids,new_item_ids,payment_method_id},db)=>swapItems(db,order_id,item_ids,new_item_ids,payment_method_id,"pending",null),
+  modify_pending_order_address:({order_id,address1,address2,city,state,country,zip},db)=>{const o=db.orders[order_id];if(!o)return "Error: order not found";
+    if(o.status!=="pending")return "Error: non-pending order cannot be modified";o.address={address1,address2,city,state,country,zip};return J(o);},
+  modify_pending_order_payment:({order_id,payment_method_id},db)=>{const o=db.orders[order_id];if(!o)return "Error: order not found";
+    if(o.status!=="pending")return "Error: non-pending order cannot be modified";const u=db.users[o.user_id];
+    if(!u.payment_methods[payment_method_id])return "Error: payment method not found";
+    if(o.payment_history[0].payment_method_id===payment_method_id)return "Error: the new payment method should be different from the current one";
+    o.payment_history[0].payment_method_id=payment_method_id;return J(o);},
+  modify_user_address:({user_id,address1,address2,city,state,country,zip},db)=>{const u=db.users[user_id];if(!u)return "Error: user not found";
+    u.address={address1,address2,city,state,country,zip};return J(u);},
+};
+function swapItems(db,order_id,item_ids,new_item_ids,payment_method_id,reqStatus,newStatus){
+  const o=db.orders[order_id]; if(!o)return "Error: order not found";
+  if(o.status!==reqStatus)return `Error: non-${reqStatus} order cannot be modified`;
+  const all=o.items.map(i=>i.item_id);
+  for(const it of item_ids){if(item_ids.filter(x=>x===it).length>all.filter(x=>x===it).length)return `Error: ${it} not found`;}
+  if(item_ids.length!==new_item_ids.length)return "Error: the number of items to be exchanged should match";
+  const u=db.users[o.user_id]; if(!u.payment_methods[payment_method_id])return "Error: payment method not found";
+  for(let i=0;i<item_ids.length;i++){const it=o.items.find(x=>x.item_id===item_ids[i]);if(!it)continue;
+    const prod=db.products[it.product_id];const nv=prod&&prod.variants[new_item_ids[i]];
+    if(!nv||!nv.available)return `Error: new item ${new_item_ids[i]} not found or available`;
+    it.item_id=new_item_ids[i];it.price=nv.price;it.options=nv.options;}
+  if(newStatus)o.status=newStatus; else o.status="item modified";
+  return J(o);
+}
+// generic fallback for any tool without a JS impl (airline writes etc.)
+function runTool(domain,name,args,sess){
+  let result;
+  if(domain==="retail"&&RETAIL_BACKEND[name]){ try{result=RETAIL_BACKEND[name](args||{},sess.db);}catch(e){result="Error: "+e.message;} }
+  else { result = `(no local backend for ${name} — call logged for grading)`; }
+  sess.calls.push({name,kwargs:args||{}});
+  return result;
+}
+
+/* ============================================================= *
+ *  LIVE AGENT  — Anthropic Messages API from the browser
+ * ============================================================= */
+const LS=window.localStorage;
+let sess=null; // {db, calls:[], transcript:[], task, mode, running}
+
+function toAnthropicTools(domain){
+  return (TOOLS[domain]||[]).map(t=>({name:t.function.name,description:t.function.description,input_schema:t.function.parameters}));
+}
+function renderLive(t){
+  const key=LS.getItem("tau_key")||"", model=LS.getItem("tau_model")||"claude-sonnet-4-6", mode=LS.getItem("tau_mode")||"human_user";
+  const retail = t.domain==="retail";
+  el("#tabbody").innerHTML = `
+    <div class="panel-card">
+      <div class="cfg">
+        <div><label>Anthropic API key (stored locally, never leaves your browser except to api.anthropic.com)</label>
+          <input id="key" type="password" placeholder="sk-ant-…" value="${esc(key)}"></div>
+        <div><label>Model</label><select id="model">
+          ${["claude-opus-4-8","claude-sonnet-4-6","claude-haiku-4-5-20251001"].map(m=>`<option ${m===model?'selected':''}>${m}</option>`).join("")}
+        </select></div>
+      </div>
+      <div style="margin-top:10px"><label class="small faint" style="text-transform:uppercase;letter-spacing:.05em">Who do you play?</label>
+        <div class="seg" id="modeSeg" style="margin-top:5px">
+          <button data-mode="human_user" class="${mode==='human_user'?'on':''}">🧑 I'm the customer · LLM is the agent</button>
+          <button data-mode="human_agent" class="${mode==='human_agent'?'on':''}">🛠️ I'm the agent · LLM is the customer</button>
+          <button data-mode="auto" class="${mode==='auto'?'on':''}">🤖 Auto (both LLM)</button>
+        </div>
+      </div>
+      ${retail?'':`<div class="note warn" style="margin-top:10px"><b>Airline note.</b> The faithful tool backend is implemented for <b>retail</b>. Airline still runs the conversation and logs tool calls for grading, but tool results are stubbed (no flight DB loaded in this local build).</div>`}
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn primary" id="startBtn">▶ Start episode</button>
+        <button class="btn" id="resetBtn">Reset</button>
+        <button class="btn" id="gradeBtn">⚖ Grade vs gold</button>
+      </div>
+    </div>
+    <div id="gradeOut"></div>
+    <div class="chat" id="chat"></div>
+    <div class="composer" id="composer" style="display:none">
+      <textarea id="input" placeholder="" rows="1"></textarea>
+      <button class="btn primary" id="sendBtn">Send</button>
+    </div>
+    <div class="panel-card"><details class="raw"><summary>Tool-call log & system prompts</summary>
+      <div id="callLog" class="small muted" style="margin:8px 0">No calls yet.</div>
+      <div class="small faint" style="margin-top:8px"><b>Agent system prompt</b> = the domain policy (wiki). <b>User-sim system prompt</b> = the τ-bench user instruction.</div>
+    </details></div>`;
+  // wire config
+  el("#key").onchange=e=>LS.setItem("tau_key",e.target.value.trim());
+  el("#model").onchange=e=>LS.setItem("tau_model",e.target.value);
+  document.querySelectorAll("#modeSeg button").forEach(b=>b.onclick=()=>{LS.setItem("tau_mode",b.dataset.mode);renderLive(t);});
+  el("#startBtn").onclick=()=>startEpisode(t);
+  el("#resetBtn").onclick=()=>{sess=null;renderLive(t);};
+  el("#gradeBtn").onclick=()=>grade(t);
+  el("#sendBtn").onclick=()=>humanSend(t);
+  el("#input").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();humanSend(t);}});
+  if(sess&&sess.task===t.id){ drawChat(); refreshComposer(t); }
+}
+
+function startEpisode(t){
+  const key=(LS.getItem("tau_key")||"").trim();
+  if(!key){alert("Enter your Anthropic API key first.");return;}
+  sess={db:freshDB(),calls:[],transcript:[],task:t.id,mode:LS.getItem("tau_mode")||"human_user",running:false};
+  drawChat(); refreshComposer(t);
+  const mode=sess.mode;
+  if(mode==="human_user"){
+    pushMsg("agent","agent","Hi! How can I help you today?");
+  } else { // human_agent or auto -> user simulator speaks first
+    pushMsg("agent","agent","Hi! How can I help you today?");
+    userSimTurn(t).then(()=>{ if(sess.mode==="auto") agentTurn(t); });
+  }
+}
+function refreshComposer(t){
+  const c=el("#composer"); if(!c)return;
+  if(!sess){c.style.display="none";return;}
+  if(sess.mode==="auto"){c.style.display="none";return;}
+  c.style.display="flex";
+  el("#input").placeholder = sess.mode==="human_user" ? "Type as the customer…" : "Type as the τ-agent (you may also call tools by typing e.g. /call get_order_details {\"order_id\":\"#W...\"})";
+}
+function pushMsg(role,who,text){ sess.transcript.push({role,who,text}); drawChat(); }
+function drawChat(){
+  const c=el("#chat"); if(!c)return;
+  c.innerHTML=sess.transcript.map(m=>`<div class="msg ${m.role}"><div class="who">${m.who}</div>${esc(m.text)}</div>`).join("");
+  c.scrollTop=c.scrollHeight;
+  const cl=el("#callLog");
+  if(cl) cl.innerHTML = sess.calls.length? sess.calls.map(c=>`<div class="${isMut(c.name)?'':'faint'}">${isMut(c.name)?'✎':'·'} ${esc(c.name)}(${esc(JSON.stringify(c.kwargs))})</div>`).join("") : "No calls yet.";
+}
+
+/* ---- API call ---- */
+async function callClaude({system,messages,tools}){
+  const key=(LS.getItem("tau_key")||"").trim(), model=LS.getItem("tau_model")||"claude-sonnet-4-6";
+  const body={model,max_tokens:1024,system,messages};
+  if(tools&&tools.length) body.tools=tools;
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+    headers:{"content-type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body:JSON.stringify(body)});
+  if(!r.ok){const txt=await r.text();throw new Error("API "+r.status+": "+txt.slice(0,300));}
+  return r.json();
+}
+
+/* ---- AGENT turn (LLM plays the τ-agent, with tool loop) ---- */
+async function agentTurn(t){
+  if(sess.running)return; sess.running=true;
+  const tools=toAnthropicTools(t.domain);
+  const system=(t.domain==="retail"?PROMPTS.retail_wiki:PROMPTS.airline_wiki)||"";
+  // build messages from transcript (user<->assistant), tool results carried inline
+  let messages=buildAgentMessages();
+  try{
+    for(let step=0;step<12;step++){
+      const res=await callClaude({system,messages,tools});
+      const blocks=res.content||[];
+      const toolUses=blocks.filter(b=>b.type==="tool_use");
+      const texts=blocks.filter(b=>b.type==="text").map(b=>b.text).join("\n").trim();
+      messages.push({role:"assistant",content:blocks});
+      if(toolUses.length){
+        const results=[];
+        for(const tu of toolUses){
+          const out=runTool(t.domain,tu.name,tu.input,sess);
+          pushToolMsg(tu.name,tu.input,out);
+          results.push({type:"tool_result",tool_use_id:tu.id,content:String(out)});
+        }
+        messages.push({role:"user",content:results});
+        continue; // keep looping until a plain text answer
+      } else {
+        if(texts) pushMsg("agent","τ-agent (LLM)",texts);
+        break;
+      }
+    }
+  }catch(e){ pushMsg("tool","error","⚠ "+e.message); }
+  sess.running=false;
+  drawChat();
+  if(sess.mode==="auto"){ // hand back to user sim
+    const last=sess.transcript.filter(m=>m.role==="agent").slice(-1)[0];
+    if(last && /###STOP###/.test(last.text)) return;
+    await userSimTurn(t);
+    if(sess&&sess.mode==="auto"){ const u=sess.transcript.slice(-1)[0]; if(u&&/###STOP###/.test(u.text)){grade(t);return;} await agentTurn(t); }
+  }
+}
+// Convert transcript into Anthropic message list for the AGENT (agent=assistant, customer=user)
+function buildAgentMessages(){
+  const msgs=[];
+  for(const m of sess.transcript){
+    if(m.role==="user") msgs.push({role:"user",content:m.text});
+    else if(m.role==="agent" && m.who!=="agent_seed") msgs.push({role:"assistant",content:m.text});
+    if(m.role==="agent"&&m.who==="agent"&&msgs.length===0) {} // seed greeting handled below
+  }
+  // ensure starts with a user msg
+  if(!msgs.length||msgs[0].role!=="user") msgs.unshift({role:"user",content:"(start)"});
+  // collapse: API needs alternating; merge consecutive same-role
+  return collapse(msgs);
+}
+function collapse(msgs){const out=[];for(const m of msgs){if(out.length&&out[out.length-1].role===m.role&&typeof out[out.length-1].content==="string"&&typeof m.content==="string"){out[out.length-1].content+="\n"+m.content;}else out.push({...m});}return out;}
+function pushToolMsg(name,input,out){ sess.transcript.push({role:"tool",who:(isMut(name)?"✎ mutating tool":"tool")+" · "+name,text:JSON.stringify(input)+"  →  "+String(out).slice(0,600)}); drawChat(); }
+
+/* ---- USER-SIM turn (LLM plays the customer) ---- */
+async function userSimTurn(t){
+  if(sess.running)return; sess.running=true;
+  const system=(PROMPTS.user_sim||"You are a user interacting with an agent.")+"\n\nInstruction: "+t.instruction;
+  // for the user sim: agent messages are "user" role (incoming), user-sim outputs are "assistant"
+  const msgs=[];
+  for(const m of sess.transcript){
+    if(m.role==="agent") msgs.push({role:"user",content:m.text});
+    else if(m.role==="user") msgs.push({role:"assistant",content:m.text});
+  }
+  if(!msgs.length||msgs[0].role!=="user") msgs.unshift({role:"user",content:"Hi! How can I help you today?"});
+  try{ const res=await callClaude({system,messages:collapse(msgs)});
+    const txt=(res.content||[]).filter(b=>b.type==="text").map(b=>b.text).join(" ").trim();
+    pushMsg("user","customer (LLM user-sim)",txt);
+  }catch(e){ pushMsg("tool","error","⚠ user-sim: "+e.message); }
+  sess.running=false;
+}
+
+/* ---- human input ---- */
+async function humanSend(t){
+  const inp=el("#input"); const v=inp.value.trim(); if(!v||!sess)return; inp.value="";
+  if(sess.mode==="human_user"){ pushMsg("user","you (customer)",v); await agentTurn(t); }
+  else if(sess.mode==="human_agent"){
+    if(v.startsWith("/call")){ // manual tool call
+      const m=v.match(/^\/call\s+(\w+)\s+(\{[\s\S]*\})?/);
+      if(m){const name=m[1];let args={};try{args=m[2]?JSON.parse(m[2]):{};}catch(e){pushMsg("tool","error","bad JSON args");return;}
+        const out=runTool(t.domain,name,args,sess);pushToolMsg(name,args,out);return;}
+    }
+    pushMsg("agent","you (τ-agent)",v); await userSimTurn(t);
+  }
+}
+
+/* ---- grading (approximation of tau-bench reward) ---- */
+function normArgs(a){const o={};Object.keys(a||{}).sort().forEach(k=>{let v=a[k];if(Array.isArray(v))v=[...v].map(String).sort();o[k]=v;});return JSON.stringify(o);}
+function callKey(c){return c.name+"|"+normArgs(c.kwargs);}
+function grade(t){
+  if(!sess){el("#gradeOut").innerHTML='<div class="note warn">Start an episode first.</div>';return;}
+  const goldMut=t.actions.filter(a=>isMut(a.name)).map(callKey).sort();
+  const gotMut=sess.calls.filter(c=>isMut(c.name)).map(callKey).sort();
+  const rAction = JSON.stringify(goldMut)===JSON.stringify(gotMut);
+  const agentText=sess.transcript.filter(m=>m.role==="agent").map(m=>m.text).join(" \n ");
+  const missing=t.outputs.filter(o=>!agentText.includes(o));
+  const rOutput = missing.length===0;
+  const reward = rAction&&rOutput;
+  el("#gradeOut").innerHTML=`<div class="panel-card ${reward?'tint-good':'tint-bad'}">
+    <div class="gradebox">
+      <div><span class="led ${rAction?'on':'off'}"></span><b>r_action</b> — mutating calls ${rAction?'match gold':'differ from gold'}</div>
+      <div><span class="led ${rOutput?'on':'off'}"></span><b>r_output</b> — ${t.outputs.length?(rOutput?'all outputs present':'missing: '+missing.map(m=>`"${esc(m)}"`).join(", ")):'none required'}</div>
+      <div style="font-size:1.3rem">reward = <b style="color:${reward?'var(--good)':'var(--bad)'}">${reward?1:0}</b></div>
+    </div>
+    <div class="small muted" style="margin-top:10px"><b>Gold writes:</b> ${goldMut.length?goldMut.map(g=>`<code>${esc(g.split('|')[0])}</code>`).join(" "):'<i>none</i>'} &nbsp;|&nbsp; <b>Your agent's writes:</b> ${gotMut.length?gotMut.map(g=>`<code>${esc(g.split('|')[0])}</code>`).join(" "):'<i>none</i>'}</div>
+    <div class="small faint" style="margin-top:6px">Approximates τ-bench's reward: real τ-bench hashes the entire final DB; here we compare the set of mutating calls (name+args) to gold, which is equivalent when gold is the unique write-set.</div>
+  </div>`;
+}
+
+/* ---------- wire filters ---------- */
+document.querySelectorAll("#domSeg button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#domSeg button").forEach(x=>x.classList.remove("on"));b.classList.add("on");fDom=b.dataset.d;renderList();});
+document.querySelectorAll("#mutSeg button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#mutSeg button").forEach(x=>x.classList.remove("on"));b.classList.add("on");fMut=b.dataset.m;renderList();});
+el("#search").addEventListener("input",e=>{fQ=e.target.value;renderList();});
+
+/* ---------- boot ---------- */
+renderList();
+select(TASKS[0]?.id);
+</script>
+</body>
+</html>
