@@ -142,16 +142,6 @@ deliverable it releases <b>τ-Bench Verified</b>, a corrected version of τ-benc
 </div>
 </section>
 
-<section>
-<h2>Why this matters for your work</h2>
-<div class="note">
-  SABER's mutating/non-mutating split is the <b>same cut</b> your lab's serializability taxonomy makes:
-  <span class="badge read">reads = INDEPENDENT</span> vs <span class="badge mut">writes = where conflicts and
-  failures live</span>. SABER shows, empirically, that in a single-agent setting the <b>writes are where
-  reliability is won or lost</b>.
-</div>
-</section>
-
 <hr>
 <p class="small muted"><b>One-line verdict.</b> SABER's <em>diagnosis</em> — failure concentrates in a small set of
 state-mutating actions — is clean, well-evidenced, and genuinely useful. Its <em>safeguard</em> works but is
