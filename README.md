@@ -1,14 +1,13 @@
 # τ-bench study site
 
 A self-contained static site (no server, no build) explaining τ-bench, a live instance explorer,
-a SABER critical reading, and a design/critique of the non-ergodic shopping-agent idea.
+and a SABER critical reading.
 
 ## Open it
 Double-click **`index.html`** (works from `file://`). Pages:
 - `index.html` — what τ-bench is / isn't / the problem it poses, the eval mechanism (`r_action × r_output`), τ vs τ², and the four 2025–26 critiques.
 - `instances.html` — **scroll all 165 tasks**, see every gold action (mutating vs read), required outputs, and **run a live agent**.
 - `saber.html` — SABER ("Small Actions, Big Errors") findings, claim, support, blind spots, overkill?, assumptions.
-- `idea.html` — the non-ergodic shopping benchmark: why it's a real gap, how to design it, pitfalls, verdict.
 
 ## Live agent (on the explorer page)
 Pick a **retail** task → **▶ Live agent** tab → paste an **Anthropic API key** (stored in your browser's
